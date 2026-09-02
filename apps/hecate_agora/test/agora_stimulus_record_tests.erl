@@ -99,6 +99,30 @@ junk_in_the_stimulus_slot_is_no_stimulus_test() ->
     ?assertEqual(undefined, decoded(post_with(<<"not a map">>))),
     ?assertEqual(undefined, decoded(post_with(null))).
 
+%% --- the closing word ---
+
+%% A synthesis is the society's CONCLUSION, not another opinion, and the
+%% record has to be able to tell a story that was finished from one that was
+%% merely abandoned.
+decodes_a_synthesis_test() ->
+    Post = (post_with(in_process_stimulus()))#{kind => synthesis},
+    {ok, Decoded} = agora_post_fact:decode(?TOPIC, Post, meta(), ?SOCIETY),
+    ?assertEqual(<<"synthesis">>, maps:get(kind, Decoded)).
+
+decodes_a_synthesis_off_the_wire_test() ->
+    Post = (post_with(in_process_stimulus()))#{kind => {text, <<"synthesis">>}},
+    {ok, Decoded} = agora_post_fact:decode(?TOPIC, Post, meta(), ?SOCIETY),
+    ?assertEqual(<<"synthesis">>, maps:get(kind, Decoded)).
+
+%% Ordinary speech carries no kind, and an unknown one is not honoured: a
+%% producer inventing a kind must not be able to dress a post as a conclusion.
+ordinary_speech_has_no_kind_test() ->
+    {ok, A} = agora_post_fact:decode(?TOPIC, post_with(undefined), meta(), ?SOCIETY),
+    ?assertEqual(undefined, maps:get(kind, A)),
+    Odd = (post_with(undefined))#{kind => {text, <<"proclamation">>}},
+    {ok, B} = agora_post_fact:decode(?TOPIC, Odd, meta(), ?SOCIETY),
+    ?assertEqual(undefined, maps:get(kind, B)).
+
 %% --- the record, and the reply ---
 
 record_test_() ->
@@ -111,6 +135,7 @@ record_test_() ->
         fun the_responder_reads_a_story_off_the_wire/1,
         fun the_published_fact_carries_it_tagged/1,
         fun the_published_fact_omits_it_for_unprompted_speech/1,
+        fun a_synthesis_survives_the_record/1,
         fun a_country_finds_what_it_reported_and_what_it_is_about/1,
         fun the_responder_reads_a_country_off_the_wire/1
     ]}.
@@ -204,6 +229,17 @@ a_country_finds_what_it_reported_and_what_it_is_about(_Db) ->
      ?_assertEqual([1000], [maps:get(posted_at, P) || P <- ByIe]),
      %% Unprompted speech names no country and is never a country's result.
      ?_assertEqual([], ByZz)].
+
+a_synthesis_survives_the_record(_Db) ->
+    Post = seed(#{post_id => <<"end">>, kind => <<"synthesis">>,
+                  stimulus => agora_test_db:stimulus(#{})}),
+    {ok, Doc} = agora_read_model:find(<<"end">>),
+    Wire = agora_read_model:to_wire(Doc),
+    [?_assertEqual(<<"synthesis">>, maps:get(<<"kind">>, Doc)),
+     ?_assertEqual({text, <<"synthesis">>}, maps:get(kind, Wire)),
+     %% And it reaches a subscriber on the published fact, not only a reader.
+     ?_assertEqual({text, <<"synthesis">>},
+                   maps:get(kind, agora_post_recorded_v1:fact(Post)))].
 
 the_responder_reads_a_country_off_the_wire(_Db) ->
     seed(#{posted_at => 1000,

@@ -66,6 +66,11 @@ shaped(PostId, From, Body, PostedAt, Topic, Payload, Meta, Society)
            body               => Body,
            in_reply_to        => text(hecate_om_wire:field(in_reply_to, Payload)),
            stimulus           => stimulus(hecate_om_wire:field(stimulus, Payload)),
+           %% `synthesis' when this post CLOSED its thread: the society's
+           %% conclusion, not another opinion. A field on the fact, never a
+           %% tag parsed back out of prose, so the record can tell a story
+           %% that was finished from one that was merely abandoned.
+           kind               => kind(text(hecate_om_wire:field(kind, Payload))),
            posted_at          => PostedAt,
            home               => text(hecate_om_wire:field(home, Payload)),
            locale             => text(hecate_om_wire:field(locale, Payload)),
@@ -77,6 +82,9 @@ shaped(PostId, From, Body, PostedAt, _Topic, _Payload, _Meta, _Society) ->
     {error, {malformed_agora_post, #{post_id => PostId, from => From,
                                      body_present => Body =/= undefined,
                                      posted_at => PostedAt}}}.
+
+kind(<<"synthesis">>) -> <<"synthesis">>;
+kind(_Ordinary)       -> undefined.
 
 %% The stimulus, shaped for the record. Kept only when it carries an
 %% `item_id', because that is the thread id and a stimulus that cannot be

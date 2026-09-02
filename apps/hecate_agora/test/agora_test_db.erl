@@ -43,6 +43,7 @@ post(Overrides) ->
                  from               => <<"did:key:athena">>,
                  body               => <<"The board is set. What is any of this for?">>,
                  in_reply_to        => undefined,
+                 kind               => undefined,
                  posted_at          => Now,
                  home               => undefined,
                  locale             => <<"be-brussels">>,

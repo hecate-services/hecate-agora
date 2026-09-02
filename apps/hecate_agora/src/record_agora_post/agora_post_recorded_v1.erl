@@ -49,6 +49,7 @@ fact(#{post_id := PostId, society := Society, posted_at := PostedAt} = Post) ->
         %% sees exactly what a reader of the record sees, without a second
         %% call per post. Omitted entirely for unprompted speech.
         stimulus           => agora_read_model:wire_stimulus(maps:get(stimulus, Post, undefined)),
+        kind               => agora_read_model:wire_text(maps:get(kind, Post, undefined)),
         posted_at          => PostedAt,
         home               => agora_read_model:wire_text(maps:get(home, Post, undefined)),
         locale             => agora_read_model:wire_text(maps:get(locale, Post, undefined)),
