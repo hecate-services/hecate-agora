@@ -202,23 +202,36 @@ oldest_first(Docs) ->
 posted_at(Doc) -> maps:get(<<"posted_at">>, Doc).
 
 %% @doc A stored document, shaped for an RPC reply: atom keys, undefined
-%% fields omitted, nothing barrel-internal.
+%% fields omitted, nothing barrel-internal, and every text field tagged
+%% `{text, Bin}'.
+%%
+%% The tag is the wire contract, not decoration. macula encodes a bare
+%% Erlang binary as a CBOR BYTE string (major type 2) and `{text, Bin}' as a
+%% CBOR TEXT string (major type 3) -- see macula_record_cbor's value table.
+%% A reply that puts prose in bare binaries reaches every non-BEAM consumer
+%% (macula-cli, macula-mcp, the Go/Rust/.NET/PHP SDKs) as hex-encoded bytes,
+%% which is exactly what the first live read of this record returned. The
+%% record exists to be read by people and their tools, so its text goes out
+%% as text. Integers stay integers.
 -spec to_wire(map()) -> map().
 to_wire(Doc) ->
     omit_undefined(#{
-        post_id            => maps:get(<<"post_id">>, Doc),
-        society            => maps:get(<<"society">>, Doc),
-        from               => maps:get(<<"from">>, Doc),
-        body               => maps:get(<<"body">>, Doc),
-        in_reply_to        => maps:get(<<"in_reply_to">>, Doc, undefined),
+        post_id            => text(maps:get(<<"post_id">>, Doc)),
+        society            => text(maps:get(<<"society">>, Doc)),
+        from               => text(maps:get(<<"from">>, Doc)),
+        body               => text(maps:get(<<"body">>, Doc)),
+        in_reply_to        => text(maps:get(<<"in_reply_to">>, Doc, undefined)),
         posted_at          => maps:get(<<"posted_at">>, Doc),
-        home               => maps:get(<<"home">>, Doc, undefined),
-        locale             => maps:get(<<"locale">>, Doc, undefined),
-        publisher          => maps:get(<<"publisher">>, Doc, undefined),
-        publisher_verified => maps:get(<<"publisher_verified">>, Doc),
+        home               => text(maps:get(<<"home">>, Doc, undefined)),
+        locale             => text(maps:get(<<"locale">>, Doc, undefined)),
+        publisher          => text(maps:get(<<"publisher">>, Doc, undefined)),
+        publisher_verified => text(maps:get(<<"publisher_verified">>, Doc)),
         heard_at           => maps:get(<<"heard_at">>, Doc),
-        heard_via          => maps:get(<<"heard_via">>, Doc)
+        heard_via          => text(maps:get(<<"heard_via">>, Doc))
     }).
+
+text(undefined) -> undefined;
+text(Bin) when is_binary(Bin) -> {text, Bin}.
 
 omit_undefined(Map) ->
     maps:filter(fun(_K, V) -> V =/= undefined end, Map).

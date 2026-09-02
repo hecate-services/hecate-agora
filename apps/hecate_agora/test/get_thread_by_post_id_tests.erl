@@ -24,25 +24,25 @@ seed() ->
     [ok = agora_read_model:record(P) || P <- [Root, R1, R2, R1a, Other]],
     #{root => Root, r1 => R1, r2 => R2, r1a => R1a}.
 
-bodies(Posts) -> [maps:get(body, P) || P <- Posts].
+bodies(Posts) -> [B || #{body := {text, B}} <- Posts].
 
 a_thread_is_the_root_and_every_descendant_in_order(_Db) ->
     #{root := Root} = seed(),
     {ok, #{root := R, posts := Posts}} = get_thread_by_post_id:get(maps:get(post_id, Root)),
-    [?_assertEqual(<<"root">>, maps:get(body, R)),
+    [?_assertEqual({text, <<"root">>}, maps:get(body, R)),
      ?_assertEqual([<<"root">>, <<"r1">>, <<"r2">>, <<"r1a">>], bodies(Posts))].
 
 asking_from_a_leaf_finds_the_same_root(_Db) ->
     #{r1a := R1a} = seed(),
     {ok, #{root := R, posts := Posts}} = get_thread_by_post_id:get(maps:get(post_id, R1a)),
-    [?_assertEqual(<<"root">>, maps:get(body, R)),
+    [?_assertEqual({text, <<"root">>}, maps:get(body, R)),
      ?_assertEqual(4, length(Posts))].
 
 a_reply_to_a_post_never_heard_is_its_own_top(_Db) ->
     Orphan = agora_test_db:post(#{posted_at => 1, in_reply_to => <<"never-heard">>, body => <<"orphan">>}),
     ok = agora_read_model:record(Orphan),
     {ok, #{root := R, posts := Posts}} = get_thread_by_post_id:get(maps:get(post_id, Orphan)),
-    [?_assertEqual(<<"orphan">>, maps:get(body, R)),
+    [?_assertEqual({text, <<"orphan">>}, maps:get(body, R)),
      ?_assertEqual([<<"orphan">>], bodies(Posts))].
 
 an_unknown_post_is_not_found(_Db) ->
@@ -56,6 +56,6 @@ the_responder_speaks_wire(_Db) ->
     {reply, Missing, S} = get_thread_by_post_id_responder:handle_request(#{post_id => <<"nope">>}, S),
     {reply, Empty, S} = get_thread_by_post_id_responder:handle_request(#{}, S),
     [?_assertEqual(1, maps:get(ok, Found)),
-     ?_assertEqual(<<"root">>, maps:get(body, maps:get(root, Found))),
+     ?_assertEqual({text, <<"root">>}, maps:get(body, maps:get(root, Found))),
      ?_assertEqual(#{ok => 0, error => <<"not_found">>}, Missing),
      ?_assertEqual(#{ok => 0, error => <<"post_id_required">>}, Empty)].

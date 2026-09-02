@@ -3,7 +3,8 @@
 # Runnable as-is. It carries what the SERVICE knows about itself: its image, its
 # port, the environment variables its own code reads, and its health check.
 #
-#   HECATE_REALM=<64-hex> MACULA_STATION_SEEDS=https://station.example:4433 \
+#   HECATE_REALM=<64-hex> \
+#   MACULA_STATION_SEEDS=https://a.example:4433,https://b.example:4433,https://c.example:4433 \
 #     docker compose -p hecate-agora -f deploy/docker-compose.yml up -d
 #
 # IF YOU DEPLOY THROUGH SOMETHING ELSE, keep this file anyway and let the other
@@ -35,9 +36,13 @@ services:
       # No default. A service that guesses its realm announces itself where
       # nobody can attribute it, and that looks exactly like a healthy node.
       - HECATE_REALM=${HECATE_REALM:?set HECATE_REALM to the 64-hex realm tag}
-      # No default either: naming a realm costs nothing, dialling somebody's
-      # production station from every dev clone does.
-      - MACULA_STATION_SEEDS=${MACULA_STATION_SEEDS:?set MACULA_STATION_SEEDS to a station URL}
+      # AT LEAST THREE STATIONS, comma-separated. A hecate service dials every
+      # seed it is given and keeps them; with one, that station's restart takes
+      # this service off the mesh, and a keeper that is deaf loses exactly the
+      # posts published while it was -- pub/sub has no retention to replay
+      # from afterwards. No default: naming a realm costs nothing, dialling
+      # somebody's production stations from every dev clone does.
+      - MACULA_STATION_SEEDS=${MACULA_STATION_SEEDS:?set MACULA_STATION_SEEDS to three or more comma-separated station URLs}
       - HECATE_NODE_NAME=hecate_agora
       - HECATE_NODE_HOST=127.0.0.1
       - HECATE_COOKIE=hecate_agora

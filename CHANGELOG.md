@@ -7,6 +7,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- Reply text fields are CBOR text strings (`{text, Bin}`), not byte strings.
+  The first live read of the record through macula-cli returned every string
+  as `0x`-prefixed hex, because a bare Erlang binary encodes as CBOR major
+  type 2. Every non-BEAM consumer now receives readable text; an Erlang
+  caller already unwrapped `{text, _}` on receipt and is unaffected.
+- README no longer claims spartan's publishes are unsigned: on the live fleet
+  `publisher_verified` is `true` on every recorded post.
+- `MACULA_STATION_SEEDS` now documents and defaults to **three or more**
+  stations. A keeper on a single seed goes deaf whenever that station
+  restarts, and the posts published during the gap are unrecoverable: pub/sub
+  keeps nothing to replay. The fleet deployment dials three.
+
 ## [0.1.0] - 2026-09-02
 
 ### Added

@@ -40,7 +40,7 @@ read_model_test_() ->
         fun a_society_named_like_a_prefix_of_another_is_kept_apart/1,
         fun replies_to_is_oldest_first/1,
         fun societies_lists_each_once/1,
-        fun to_wire_uses_atom_keys_and_omits_undefined/1
+        fun to_wire_uses_atom_keys_text_tags_and_omits_undefined/1
     ]}.
 
 record_then_find_round_trips_every_field(_Db) ->
@@ -135,13 +135,18 @@ replies_to_is_oldest_first(_Db) ->
     {ok, Replies} = agora_read_model:replies_to(RootId, 10),
     ?_assertEqual([10, 20, 30], [maps:get(<<"posted_at">>, D) || D <- Replies]).
 
-to_wire_uses_atom_keys_and_omits_undefined(_Db) ->
+to_wire_uses_atom_keys_text_tags_and_omits_undefined(_Db) ->
     Post = agora_test_db:post(#{}),
     ok = agora_read_model:record(Post),
     {ok, Doc} = agora_read_model:find(maps:get(post_id, Post)),
     Wire = agora_read_model:to_wire(Doc),
-    [?_assertEqual(maps:get(post_id, Post), maps:get(post_id, Wire)),
-     ?_assertEqual(<<"spartan">>, maps:get(society, Wire)),
+    [?_assertEqual({text, maps:get(post_id, Post)}, maps:get(post_id, Wire)),
+     ?_assertEqual({text, <<"spartan">>}, maps:get(society, Wire)),
+     ?_assertEqual({text, maps:get(body, Post)}, maps:get(body, Wire)),
+     ?_assert(is_integer(maps:get(posted_at, Wire))),
      ?_assertNot(maps:is_key(in_reply_to, Wire)),
      ?_assertNot(maps:is_key(publisher, Wire)),
-     ?_assertEqual([], [K || K <- maps:keys(Wire), not is_atom(K)])].
+     ?_assertEqual([], [K || K <- maps:keys(Wire), not is_atom(K)]),
+     %% Every binary-valued field is a CBOR text string on the wire, never a
+     %% byte string that a non-BEAM reader would see as hex.
+     ?_assertEqual([], [K || K := V <- Wire, is_binary(V)])].
