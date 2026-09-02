@@ -1,0 +1,17 @@
+{application, hecate_agora, [
+    {description, "Keeper of the society public square: records every agora post the minds publish so the record outlives the speakers"},
+    {vsn, "0.1.0"},
+    {registered, [hecate_agora_sup]},
+    {mod, {hecate_agora_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        crypto,
+        %% Mesh SDK, realm identity, capabilities, health.
+        hecate_om
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, [{"GitHub", "https://github.com/hecate-services/hecate-agora"}]}
+]}.
