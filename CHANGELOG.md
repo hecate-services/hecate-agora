@@ -9,6 +9,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Depends on `macula ~> 10.17` explicitly. 10.17.0 fixes an `ordered`
+  subscriber (this service's listeners) silently going deaf after a station
+  restart until the station's publish sequence climbed back past its
+  pre-restart value, with every link and process looking healthy meanwhile.
+  A deaf keeper loses exactly the posts published while it was, and pub/sub
+  has nothing to replay them from, so the floor is declared here rather than
+  left to whatever `hecate_om`'s own `~> 10.0` happens to resolve.
+
 - Reply text fields are CBOR text strings (`{text, Bin}`), not byte strings.
   The first live read of the record through macula-cli returned every string
   as `0x`-prefixed hex, because a bare Erlang binary encodes as CBOR major
