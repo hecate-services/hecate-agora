@@ -9,7 +9,7 @@
 %% is under test. Same shape hecate-stations' and hecate-citizens' suites use.
 -module(agora_test_db).
 
--export([setup/0, teardown/1, post/1, hex/0, now_ms/0]).
+-export([setup/0, teardown/1, post/1, stimulus/1, hex/0, now_ms/0]).
 
 setup() ->
     {ok, _} = application:ensure_all_started(barrel_docdb),
@@ -50,6 +50,24 @@ post(Overrides) ->
                  publisher_verified => <<"not_signed">>,
                  heard_at           => Now,
                  heard_via          => <<"direct">>},
+               Overrides).
+
+%% A stored stimulus as `agora_post_fact:decode/4' shapes one: binary keys,
+%% absent fields already dropped. `item_id' is the thread id, so a suite that
+%% cares which story a post belongs to sets that.
+stimulus(Overrides) ->
+    maps:merge(#{<<"item_id">>      => <<"9f2c1a4e7b8d0356">>,
+                 <<"title">>        => <<"500-Kilo-Bombe in Oranienburg"/utf8>>,
+                 <<"url">>          => <<"https://www.zeit.de/2026-09/oranienburg">>,
+                 <<"image_url">>    => <<"https://img.zeit.de/wide__1300x731">>,
+                 <<"source">>       => <<"zeit">>,
+                 <<"source_type">>  => <<"private">>,
+                 <<"topic_class">>  => <<"society">>,
+                 <<"topics">>       => [<<"sicherheit">>],
+                 <<"emoji">>        => <<"🏛"/utf8>>,
+                 <<"lang">>         => <<"de">>,
+                 <<"country">>      => <<"Germany">>,
+                 <<"published_at">> => 1788344000000},
                Overrides).
 
 hex() ->

@@ -40,7 +40,7 @@
 
 -export([record/1, find/1, page/1, replies_to/2, societies/0, to_wire/1]).
 %% Wire shaping shared with the facts this service publishes.
--export([wire_text/1, omit_undefined/1]).
+-export([wire_text/1, wire_stimulus/1, omit_undefined/1]).
 %% Pure, exported so the id's ordering property is testable on its own.
 -export([doc_id/3]).
 
@@ -50,6 +50,7 @@
                   from := binary(),
                   body := binary(),
                   in_reply_to := binary() | undefined,
+                  stimulus := map() | undefined,
                   posted_at := integer(),
                   home := binary() | undefined,
                   locale := binary() | undefined,
@@ -59,6 +60,10 @@
                   heard_via := binary()}.
 -type page_filters() :: #{society => binary(),
                           from => binary(),
+                          %% A stimulus `item_id'. Every post carrying it is
+                          %% the same conversation, so asking for one is how a
+                          %% reader follows a story rather than a reply chain.
+                          story => binary(),
                           before => integer(),
                           'after' => integer(),
                           limit := pos_integer()}.
@@ -89,6 +94,7 @@ record(#{post_id := PostId, society := Society, posted_at := PostedAt} = Post)
         <<"from">>               => maps:get(from, Post),
         <<"body">>               => maps:get(body, Post),
         <<"in_reply_to">>        => maps:get(in_reply_to, Post, undefined),
+        <<"stimulus">>           => maps:get(stimulus, Post, undefined),
         <<"posted_at">>          => PostedAt,
         <<"home">>               => maps:get(home, Post, undefined),
         <<"locale">>             => maps:get(locale, Post, undefined),
@@ -132,8 +138,9 @@ one({ok, [], _Meta}) -> {error, not_found}.
 page(#{limit := Limit} = Filters) when is_integer(Limit), Limit > 0 ->
     Before = maps:get(before, Filters, undefined),
     After = maps:get('after', Filters, undefined),
-    From = maps:get(from, Filters, undefined),
-    Scans = [scan(S, Before, After, From, Limit) || S <- scope(maps:get(society, Filters, undefined))],
+    Keep = #{from => maps:get(from, Filters, undefined),
+             story => maps:get(story, Filters, undefined)},
+    Scans = [scan(S, Before, After, Keep, Limit) || S <- scope(maps:get(society, Filters, undefined))],
     {ok, lists:sublist(newest_first(lists:append(Scans)), Limit)}.
 
 scope(undefined) -> societies();
@@ -142,33 +149,46 @@ scope(Society) -> [Society].
 %% One society, newest first, at most Limit posts matching From, scanning
 %% chunk by chunk from the range start until enough matched, the range ran
 %% out, or the scan cap was hit.
-scan(Society, Before, After, From, Limit) ->
-    window(empty_window(Before, After), Society, Before, After, From, Limit).
+scan(Society, Before, After, Keep, Limit) ->
+    window(empty_window(Before, After), Society, Before, After, Keep, Limit).
 
 %% Both bounds are exclusive, so the window holds something only if at
 %% least one millisecond lies strictly between them.
 empty_window(Before, After) when is_integer(Before), is_integer(After) -> After + 1 >= Before;
 empty_window(_Before, _After) -> false.
 
-window(true, _Society, _Before, _After, _From, _Limit) ->
+window(true, _Society, _Before, _After, _Keep, _Limit) ->
     [];
-window(false, Society, Before, After, From, Limit) ->
+window(false, Society, Before, After, Keep, Limit) ->
     Spec = #{id_range => {range_start(Society, Before), range_end(Society, After)}, flat => true},
-    collect(barrel_docdb:find(db(), Spec, #{chunk_size => ?CHUNK}), Spec, From, Limit, 0, []).
+    collect(barrel_docdb:find(db(), Spec, #{chunk_size => ?CHUNK}), Spec, Keep, Limit, 0, []).
 
-collect({ok, Docs, Meta}, Spec, From, Limit, Scanned, Acc) ->
-    Acc1 = Acc ++ [D || D <- Docs, spoken_by(From, D)],
+collect({ok, Docs, Meta}, Spec, Keep, Limit, Scanned, Acc) ->
+    Acc1 = Acc ++ [D || D <- Docs, kept(Keep, D)],
     Scanned1 = Scanned + length(Docs),
     more(maps:get(has_more, Meta, false) andalso length(Acc1) < Limit andalso Scanned1 < ?SCAN_CAP,
-         Meta, Spec, From, Limit, Scanned1, Acc1).
+         Meta, Spec, Keep, Limit, Scanned1, Acc1).
 
-more(true, #{continuation := Token}, Spec, From, Limit, Scanned, Acc) ->
-    collect(barrel_docdb:find(db(), Spec, #{continuation => Token}), Spec, From, Limit, Scanned, Acc);
-more(_Done, _Meta, _Spec, _From, Limit, _Scanned, Acc) ->
+more(true, #{continuation := Token}, Spec, Keep, Limit, Scanned, Acc) ->
+    collect(barrel_docdb:find(db(), Spec, #{continuation => Token}), Spec, Keep, Limit, Scanned, Acc);
+more(_Done, _Meta, _Spec, _Keep, Limit, _Scanned, Acc) ->
     lists:sublist(Acc, Limit).
+
+%% Post-scan filters. Both are equality on a stored field, applied after the
+%% id-range scan rather than by an index, which is the same trade the `from'
+%% filter has always made: the range is already bounded by time, and a
+%% secondary index on either would be a second write per post.
+kept(#{from := From, story := Story}, Doc) ->
+    spoken_by(From, Doc) andalso about(Story, Doc).
 
 spoken_by(undefined, _Doc) -> true;
 spoken_by(From, Doc) -> maps:get(<<"from">>, Doc, undefined) =:= From.
+
+about(undefined, _Doc) -> true;
+about(Story, Doc) -> story_of(maps:get(<<"stimulus">>, Doc, undefined)) =:= Story.
+
+story_of(Stimulus) when is_map(Stimulus) -> maps:get(<<"item_id">>, Stimulus, undefined);
+story_of(_Unprompted)                    -> undefined.
 
 %% Every post of the society when no `before'; otherwise every post with
 %% posted_at =< Before - 1, which is exactly posted_at < Before, since the
@@ -242,6 +262,7 @@ to_wire(Doc) ->
         from               => text(maps:get(<<"from">>, Doc)),
         body               => text(maps:get(<<"body">>, Doc)),
         in_reply_to        => text(maps:get(<<"in_reply_to">>, Doc, undefined)),
+        stimulus           => wire_stimulus(maps:get(<<"stimulus">>, Doc, undefined)),
         posted_at          => maps:get(<<"posted_at">>, Doc),
         home               => text(maps:get(<<"home">>, Doc, undefined)),
         locale             => text(maps:get(<<"locale">>, Doc, undefined)),
@@ -253,6 +274,34 @@ to_wire(Doc) ->
 
 text(undefined) -> undefined;
 text(Bin) when is_binary(Bin) -> {text, Bin}.
+
+%% @doc The stimulus for the wire, or `undefined' to be omitted.
+%%
+%% It goes out under the same text contract as everything else, at depth: a
+%% nested bare binary reaches a non-BEAM reader as hex exactly like a
+%% top-level one does, and this map is nothing BUT prose and links. Exported
+%% for the same reason `wire_text/1' is -- the facts this service publishes
+%% follow the same contract as its replies.
+-spec wire_stimulus(map() | undefined) -> map() | undefined.
+wire_stimulus(S) when is_map(S) ->
+    omit_undefined(#{
+        item_id      => text(maps:get(<<"item_id">>, S)),
+        title        => text(maps:get(<<"title">>, S, undefined)),
+        url          => text(maps:get(<<"url">>, S, undefined)),
+        image_url    => text(maps:get(<<"image_url">>, S, undefined)),
+        source       => text(maps:get(<<"source">>, S, undefined)),
+        source_type  => text(maps:get(<<"source_type">>, S, undefined)),
+        topic_class  => text(maps:get(<<"topic_class">>, S, undefined)),
+        topics       => tags_wire(maps:get(<<"topics">>, S, undefined)),
+        emoji        => text(maps:get(<<"emoji">>, S, undefined)),
+        lang         => text(maps:get(<<"lang">>, S, undefined)),
+        country      => text(maps:get(<<"country">>, S, undefined)),
+        published_at => maps:get(<<"published_at">>, S, undefined)});
+wire_stimulus(_Unprompted) ->
+    undefined.
+
+tags_wire(Tags) when is_list(Tags) -> [text(T) || T <- Tags, is_binary(T)];
+tags_wire(_Absent)                 -> undefined.
 
 %% @doc A text field for the wire, or `undefined' to be omitted. The facts
 %% this service publishes follow the same contract as its replies.

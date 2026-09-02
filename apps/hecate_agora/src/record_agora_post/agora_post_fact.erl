@@ -5,7 +5,14 @@
 %% (`maybe_publish_to_agora:fact/1'):
 %%
 %%   #{type => agora_post, post_id, from, body, in_reply_to, posted_at,
-%%     home, locale}
+%%     home, locale, stimulus}
+%%
+%% `stimulus' is what the speaking mind was reacting to: the news item its
+%% own node attached, verbatim, without the model ever touching it. It is
+%% therefore the one part of a post that is provenance rather than a claim.
+%% Absent for unprompted speech (a committee, a visitor's question, a
+%% self-alert), and absent is not the same as empty. Its `item_id' is the
+%% THREAD id: every post carrying the same one is the same conversation.
 %%
 %% A pubsub payload does not arrive as the map the producer built. Keys may
 %% be atoms or binaries, a CBOR text value may arrive as `{text, Bin}' or as
@@ -58,6 +65,7 @@ shaped(PostId, From, Body, PostedAt, Topic, Payload, Meta, Society)
            from               => From,
            body               => Body,
            in_reply_to        => text(hecate_om_wire:field(in_reply_to, Payload)),
+           stimulus           => stimulus(hecate_om_wire:field(stimulus, Payload)),
            posted_at          => PostedAt,
            home               => text(hecate_om_wire:field(home, Payload)),
            locale             => text(hecate_om_wire:field(locale, Payload)),
@@ -69,6 +77,40 @@ shaped(PostId, From, Body, PostedAt, _Topic, _Payload, _Meta, _Society) ->
     {error, {malformed_agora_post, #{post_id => PostId, from => From,
                                      body_present => Body =/= undefined,
                                      posted_at => PostedAt}}}.
+
+%% The stimulus, shaped for the record. Kept only when it carries an
+%% `item_id', because that is the thread id and a stimulus that cannot be
+%% grouped is not worth storing. Every other field is optional: 21 of the 47
+%% live sources publish no picture, and the gazetteer does not place every
+%% story. The producer owns this content and we accept it as sent, but a
+%% shape that cannot be used is refused rather than half-stored.
+stimulus(Carried) when is_map(Carried) ->
+    shaped_stimulus(text(hecate_om_wire:field(item_id, Carried)), Carried);
+stimulus(_AbsentOrNotAMap) ->
+    undefined.
+
+shaped_stimulus(undefined, _Carried) ->
+    undefined;
+shaped_stimulus(ItemId, Carried) ->
+    agora_read_model:omit_undefined(
+      #{<<"item_id">>      => ItemId,
+        <<"title">>        => text(hecate_om_wire:field(title, Carried)),
+        <<"url">>          => text(hecate_om_wire:field(url, Carried)),
+        <<"image_url">>    => text(hecate_om_wire:field(image_url, Carried)),
+        <<"source">>       => text(hecate_om_wire:field(source, Carried)),
+        <<"source_type">>  => text(hecate_om_wire:field(source_type, Carried)),
+        <<"topic_class">>  => text(hecate_om_wire:field(topic_class, Carried)),
+        <<"topics">>       => tags(hecate_om_wire:field(topics, Carried)),
+        <<"emoji">>        => text(hecate_om_wire:field(emoji, Carried)),
+        <<"lang">>         => text(hecate_om_wire:field(lang, Carried)),
+        <<"country">>      => text(hecate_om_wire:field(country, Carried)),
+        <<"published_at">> => whole(hecate_om_wire:field(published_at, Carried))}).
+
+tags(List) when is_list(List) -> [T || Raw <- List, (T = text(Raw)) =/= undefined];
+tags(_AbsentOrNotAList)      -> undefined.
+
+whole(N) when is_integer(N), N >= 0 -> N;
+whole(_AbsentOrNotAWholeNumber)     -> undefined.
 
 %% A wire text value after `hecate_om_wire' has unwrapped it: a binary, an
 %% atom the VM already knew, or absent.

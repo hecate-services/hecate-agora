@@ -45,6 +45,10 @@ fact(#{post_id := PostId, society := Society, posted_at := PostedAt} = Post) ->
         from               => {text, maps:get(from, Post)},
         body               => {text, maps:get(body, Post)},
         in_reply_to        => agora_read_model:wire_text(maps:get(in_reply_to, Post, undefined)),
+        %% What the mind was reacting to, so a visualizer subscribing here
+        %% sees exactly what a reader of the record sees, without a second
+        %% call per post. Omitted entirely for unprompted speech.
+        stimulus           => agora_read_model:wire_stimulus(maps:get(stimulus, Post, undefined)),
         posted_at          => PostedAt,
         home               => agora_read_model:wire_text(maps:get(home, Post, undefined)),
         locale             => agora_read_model:wire_text(maps:get(locale, Post, undefined)),
