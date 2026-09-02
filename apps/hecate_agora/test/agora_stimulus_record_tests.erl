@@ -31,7 +31,10 @@ in_process_stimulus() ->
       topics       => [<<"sicherheit">>, <<"brandenburg">>],
       emoji        => <<"🏛"/utf8>>,
       lang         => <<"de">>,
-      country      => <<"Germany">>,
+      reporting_country      => <<"de">>,
+      reporting_country_name => <<"Germany">>,
+      subject_country        => <<"de">>,
+      subject_country_name   => <<"Germany">>,
       published_at => 1788344000000}.
 
 post_with(Stimulus) ->
@@ -70,7 +73,7 @@ decodes_the_wire_shape_test() ->
                                   <<"title">>     => {text, <<"Un titolo"/utf8>>},
                                   <<"topics">>    => [{text, <<"energia">>}],
                                   <<"image_url">> => null,
-                                  <<"country">>   => null}},
+                                  <<"subject_country">> => null}},
     S = decoded(Wire),
     ?assertEqual(<<"abc">>, maps:get(<<"item_id">>, S)),
     ?assertEqual(<<"ansa">>, maps:get(<<"source">>, S)),
@@ -78,7 +81,7 @@ decodes_the_wire_shape_test() ->
     %% Absent stays absent. A reader must be able to tell "no picture" from
     %% "a picture we mangled", and 21 of the 47 live sources publish none.
     ?assertNot(maps:is_key(<<"image_url">>, S)),
-    ?assertNot(maps:is_key(<<"country">>, S)).
+    ?assertNot(maps:is_key(<<"subject_country">>, S)).
 
 %% A committee, a visitor's question, a self-alert. Not an error.
 unprompted_speech_decodes_without_one_test() ->
@@ -107,7 +110,9 @@ record_test_() ->
         fun a_story_filter_excludes_unprompted_speech/1,
         fun the_responder_reads_a_story_off_the_wire/1,
         fun the_published_fact_carries_it_tagged/1,
-        fun the_published_fact_omits_it_for_unprompted_speech/1
+        fun the_published_fact_omits_it_for_unprompted_speech/1,
+        fun a_country_finds_what_it_reported_and_what_it_is_about/1,
+        fun the_responder_reads_a_country_off_the_wire/1
     ]}.
 
 seed(Overrides) ->
@@ -135,6 +140,10 @@ the_reply_tags_every_text_at_depth(_Db) ->
      ?_assertEqual({text, <<"https://img.zeit.de/wide__1300x731">>},
                    maps:get(image_url, S)),
      ?_assertEqual([{text, <<"sicherheit">>}], maps:get(topics, S)),
+     %% Both countries, both halves, all tagged. A bare binary two levels down
+     %% reaches a non-BEAM reader as hex exactly like a top-level one does.
+     ?_assertEqual({text, <<"de">>}, maps:get(reporting_country, S)),
+     ?_assertEqual({text, <<"Germany">>}, maps:get(subject_country_name, S)),
      %% Integers stay integers. A tagged one is not a number any more.
      ?_assertEqual(1788344000000, maps:get(published_at, S))].
 
@@ -174,6 +183,36 @@ the_published_fact_carries_it_tagged(_Db) ->
 the_published_fact_omits_it_for_unprompted_speech(_Db) ->
     Post = seed(#{post_id => <<"p1">>}),
     ?_assertNot(maps:is_key(stimulus, agora_post_recorded_v1:fact(Post))).
+
+%% One filter, either axis. An Irish broadcaster on Poland answers to `pl'
+%% because the story is about Poland, and to `ie' because Ireland told it.
+%% Making a reader choose an axis first is asking them to learn the schema.
+a_country_finds_what_it_reported_and_what_it_is_about(_Db) ->
+    Irish = agora_test_db:stimulus(#{<<"item_id">> => <<"i1">>,
+                                     <<"reporting_country">> => <<"ie">>,
+                                     <<"subject_country">> => <<"pl">>}),
+    Polish = agora_test_db:stimulus(#{<<"item_id">> => <<"p1">>,
+                                      <<"reporting_country">> => <<"pl">>,
+                                      <<"subject_country">> => <<"ua">>}),
+    seed(#{posted_at => 1000, stimulus => Irish}),
+    seed(#{posted_at => 2000, stimulus => Polish}),
+    seed(#{posted_at => 3000}),
+    #{posts := ByPl} = get_posts_page:get(#{limit => 10, country => <<"pl">>}),
+    #{posts := ByIe} = get_posts_page:get(#{limit => 10, country => <<"ie">>}),
+    #{posts := ByZz} = get_posts_page:get(#{limit => 10, country => <<"zz">>}),
+    [?_assertEqual([2000, 1000], [maps:get(posted_at, P) || P <- ByPl]),
+     ?_assertEqual([1000], [maps:get(posted_at, P) || P <- ByIe]),
+     %% Unprompted speech names no country and is never a country's result.
+     ?_assertEqual([], ByZz)].
+
+the_responder_reads_a_country_off_the_wire(_Db) ->
+    seed(#{posted_at => 1000,
+           stimulus => agora_test_db:stimulus(#{<<"subject_country">> => <<"ua">>})}),
+    seed(#{posted_at => 2000}),
+    {ok, S} = get_posts_page_responder:init([]),
+    {reply, Reply, S} = get_posts_page_responder:handle_request(
+                          #{<<"country">> => {text, <<"ua">>}, <<"limit">> => 10}, S),
+    [?_assertEqual([1000], [maps:get(posted_at, P) || P <- maps:get(posts, Reply)])].
 
 the_responder_reads_a_story_off_the_wire(_Db) ->
     seed(#{posted_at => 1000,

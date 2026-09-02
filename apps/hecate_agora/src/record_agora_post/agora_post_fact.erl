@@ -103,7 +103,14 @@ shaped_stimulus(ItemId, Carried) ->
         <<"topics">>       => tags(hecate_om_wire:field(topics, Carried)),
         <<"emoji">>        => text(hecate_om_wire:field(emoji, Carried)),
         <<"lang">>         => text(hecate_om_wire:field(lang, Carried)),
-        <<"country">>      => text(hecate_om_wire:field(country, Carried)),
+        %% Two countries: who reported it (exact, from the source's config) and
+        %% what it is about (a gazetteer guess). Both codes and both names,
+        %% because a flag and a filter need the code, and a name can be absent
+        %% while its code is present.
+        <<"reporting_country">>      => text(hecate_om_wire:field(reporting_country, Carried)),
+        <<"reporting_country_name">> => text(hecate_om_wire:field(reporting_country_name, Carried)),
+        <<"subject_country">>        => text(hecate_om_wire:field(subject_country, Carried)),
+        <<"subject_country_name">>   => text(hecate_om_wire:field(subject_country_name, Carried)),
         <<"published_at">> => whole(hecate_om_wire:field(published_at, Carried))}).
 
 tags(List) when is_list(List) -> [T || Raw <- List, (T = text(Raw)) =/= undefined];

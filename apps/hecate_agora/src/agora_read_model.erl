@@ -64,6 +64,14 @@
                           %% the same conversation, so asking for one is how a
                           %% reader follows a story rather than a reply chain.
                           story => binary(),
+                          %% An ISO-2 code. Matches a post whose stimulus names
+                          %% that country on EITHER axis, so "pl" finds both what
+                          %% Poland reported and what was reported about Poland.
+                          %% One filter rather than two, because a reader asking
+                          %% for a country wants the country, and a page that
+                          %% makes them pick an axis first has asked them to
+                          %% learn the schema.
+                          country => binary(),
                           before => integer(),
                           'after' => integer(),
                           limit := pos_integer()}.
@@ -139,7 +147,8 @@ page(#{limit := Limit} = Filters) when is_integer(Limit), Limit > 0 ->
     Before = maps:get(before, Filters, undefined),
     After = maps:get('after', Filters, undefined),
     Keep = #{from => maps:get(from, Filters, undefined),
-             story => maps:get(story, Filters, undefined)},
+             story => maps:get(story, Filters, undefined),
+             country => maps:get(country, Filters, undefined)},
     Scans = [scan(S, Before, After, Keep, Limit) || S <- scope(maps:get(society, Filters, undefined))],
     {ok, lists:sublist(newest_first(lists:append(Scans)), Limit)}.
 
@@ -178,8 +187,8 @@ more(_Done, _Meta, _Spec, _Keep, Limit, _Scanned, Acc) ->
 %% id-range scan rather than by an index, which is the same trade the `from'
 %% filter has always made: the range is already bounded by time, and a
 %% secondary index on either would be a second write per post.
-kept(#{from := From, story := Story}, Doc) ->
-    spoken_by(From, Doc) andalso about(Story, Doc).
+kept(#{from := From, story := Story, country := Country}, Doc) ->
+    spoken_by(From, Doc) andalso about(Story, Doc) andalso touches(Country, Doc).
 
 spoken_by(undefined, _Doc) -> true;
 spoken_by(From, Doc) -> maps:get(<<"from">>, Doc, undefined) =:= From.
@@ -189,6 +198,15 @@ about(Story, Doc) -> story_of(maps:get(<<"stimulus">>, Doc, undefined)) =:= Stor
 
 story_of(Stimulus) when is_map(Stimulus) -> maps:get(<<"item_id">>, Stimulus, undefined);
 story_of(_Unprompted)                    -> undefined.
+
+touches(undefined, _Doc) -> true;
+touches(Country, Doc)    -> lists:member(Country, countries_of(maps:get(<<"stimulus">>, Doc, undefined))).
+
+countries_of(S) when is_map(S) ->
+    [C || Key <- [<<"reporting_country">>, <<"subject_country">>],
+          (C = maps:get(Key, S, undefined)) =/= undefined];
+countries_of(_Unprompted) ->
+    [].
 
 %% Every post of the society when no `before'; otherwise every post with
 %% posted_at =< Before - 1, which is exactly posted_at < Before, since the
@@ -295,7 +313,10 @@ wire_stimulus(S) when is_map(S) ->
         topics       => tags_wire(maps:get(<<"topics">>, S, undefined)),
         emoji        => text(maps:get(<<"emoji">>, S, undefined)),
         lang         => text(maps:get(<<"lang">>, S, undefined)),
-        country      => text(maps:get(<<"country">>, S, undefined)),
+        reporting_country      => text(maps:get(<<"reporting_country">>, S, undefined)),
+        reporting_country_name => text(maps:get(<<"reporting_country_name">>, S, undefined)),
+        subject_country        => text(maps:get(<<"subject_country">>, S, undefined)),
+        subject_country_name   => text(maps:get(<<"subject_country_name">>, S, undefined)),
         published_at => maps:get(<<"published_at">>, S, undefined)});
 wire_stimulus(_Unprompted) ->
     undefined.

@@ -66,7 +66,10 @@ stimulus(Overrides) ->
                  <<"topics">>       => [<<"sicherheit">>],
                  <<"emoji">>        => <<"🏛"/utf8>>,
                  <<"lang">>         => <<"de">>,
-                 <<"country">>      => <<"Germany">>,
+                 <<"reporting_country">>      => <<"de">>,
+                 <<"reporting_country_name">>  => <<"Germany">>,
+                 <<"subject_country">>         => <<"de">>,
+                 <<"subject_country_name">>    => <<"Germany">>,
                  <<"published_at">> => 1788344000000},
                Overrides).
 

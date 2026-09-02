@@ -5,7 +5,8 @@
 %% record is public too.
 %%
 %% Payload, all optional: `society', `from', `story' (a stimulus `item_id',
-%% which is the thread id), `before' and `after' (ms, both exclusive),
+%% which is the thread id), `country' (an ISO-2 code, matching either axis of
+%% the stimulus), `before' and `after' (ms, both exclusive),
 %% `limit'. Reply: `#{ok => 1, posts => [...], next_before => Ms}', with
 %% `next_before' omitted on the last page. No booleans cross the wire.
 -module(get_posts_page_responder).
@@ -22,6 +23,7 @@ handle_request(Payload, State) ->
         society => text(hecate_om_wire:field(society, Payload)),
         from    => text(hecate_om_wire:field(from, Payload)),
         story   => text(hecate_om_wire:field(story, Payload)),
+        country => text(hecate_om_wire:field(country, Payload)),
         before  => integer(hecate_om_wire:field(before, Payload)),
         'after' => integer(hecate_om_wire:field('after', Payload)),
         limit   => integer(hecate_om_wire:field(limit, Payload))

@@ -15,6 +15,11 @@
 %% than a reply chain -- which matters because minds in this square reply to
 %% the world far more often than to each other, and a thread built only from
 %% `in_reply_to' would show almost nothing.
+%%
+%% `country' is an ISO-2 code and matches EITHER axis of the stimulus: who
+%% reported it, or what it is about. One filter rather than two, because a
+%% reader asking for Poland wants Poland, and making them choose an axis first
+%% asks them to learn the schema before they can read.
 -module(get_posts_page).
 
 -export([get/1]).
@@ -25,6 +30,7 @@
 -type request() :: #{society => binary(),
                      from => binary(),
                      story => binary(),
+                     country => binary(),
                      before => integer(),
                      'after' => integer(),
                      limit => integer()}.
@@ -35,7 +41,7 @@
 -spec get(request()) -> #{posts := [map()], next_before := integer() | undefined}.
 get(Request) ->
     Limit = clamp(maps:get(limit, Request, ?DEFAULT_LIMIT)),
-    Filters = maps:with([society, from, story, before, 'after'], Request),
+    Filters = maps:with([society, from, story, country, before, 'after'], Request),
     {ok, Docs} = agora_read_model:page(Filters#{limit => Limit}),
     #{posts       => [agora_read_model:to_wire(D) || D <- Docs],
       next_before => next_before(length(Docs) =:= Limit, Docs)}.
