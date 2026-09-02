@@ -30,5 +30,15 @@
         %% hour, because nothing translates between the two by itself.
         {realm,             <<"${HECATE_REALM}">>}
     ]},
+    %% barrel_docdb's own system databases (_barrel_system, _replication_tasks)
+    %% default to `data/barrel_docdb' RELATIVE TO THE WORKING DIRECTORY, which
+    %% inside the image is /app -- ephemeral, recreated on every container
+    %% recreate. The record itself is placed explicitly by hecate_om_read_model
+    %% under ${HECATE_DATA_DIR}; this puts barrel's own bookkeeping beside it on
+    %% the same volume, so nothing this service writes lives in the container
+    %% filesystem. Observed on the first smoke boot of this release.
+    {barrel_docdb, [
+        {data_dir, "${HECATE_DATA_DIR}/barrel_docdb"}
+    ]},
     {kernel, [{logger_level, info}]}
 ].
