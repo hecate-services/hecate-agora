@@ -112,17 +112,19 @@ identity_spec_has_the_shape_hecate_om_expects_test() ->
     ?assert(is_list(Resources)),
     ?assert(is_integer(Ttl) andalso Ttl > 0).
 
-%% The authority asked for is exactly what is announced and listened to: the
-%% three reads as actions, the agora topics as resources, and no publish
-%% authority anywhere, because this service must never be able to put words in
-%% the square it keeps.
-authority_matches_what_is_announced_and_heard_test() ->
+%% The authority asked for is exactly what is announced, listened to and
+%% published: the three reads and the two facts as actions, the agora topics
+%% and the two keeper topics as resources. No keeper topic is a society's
+%% `<ns>/agora', so this service still cannot put words in the square it keeps.
+authority_matches_what_is_announced_heard_and_published_test() ->
     os:unsetenv("HECATE_AGORA_SOCIETIES"),
     #{actions := Actions, resources := Resources} = ?SERVICE:identity_spec(),
     Announced = [binary:part(N, byte_size(<<"hecate_agora.">>), byte_size(N) - byte_size(<<"hecate_agora.">>))
                  || #{name := N} <- ?SERVICE:capabilities()],
-    ?assertEqual(Announced, Actions),
-    ?assertEqual([Topic || {Topic, _, _} <- ?SERVICE:subscriptions()], Resources).
+    Published = [agora_post_recorded_v1:topic(), agora_post_conflict_detected_v1:topic()],
+    ?assertEqual(Announced ++ [<<"post_recorded">>, <<"post_conflict_detected">>], Actions),
+    ?assertEqual([Topic || {Topic, _, _} <- ?SERVICE:subscriptions()] ++ Published, Resources),
+    ?assertEqual([], [T || T <- Published, agora_societies:society_of_topic(T) =/= undefined]).
 
 %% The supervisor starts and stops cleanly on its own, without hecate_om. It has
 %% no children of its own, and that is the honest shape: the listeners are

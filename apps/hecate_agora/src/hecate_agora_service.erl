@@ -12,7 +12,10 @@
 %% said. This service is the keeper: it subscribes to each configured
 %% society's `<ns>/agora', writes every post once into a barrel_docdb record on
 %% a disk the speakers do not own, and serves that record back over three mesh
-%% RPCs. It publishes nothing and speaks for nobody.
+%% RPCs. It speaks for nobody: the only facts it publishes are its own,
+%% under its own `agora/' namespace, and say that a post entered the record
+%% (`agora_post_recorded_v1') or that two different posts claimed one id
+%% (`agora_post_conflict_detected_v1'). Never a word into a society's square.
 %%
 %% Same cardinality as hecate-warden to hecate-sentinel and hecate-grid to
 %% hecate-archive: many store-free producers, one service that holds the
@@ -32,7 +35,7 @@
 
 info() ->
     #{name => <<"hecate-agora">>,
-      version => <<"0.1.0">>,
+      version => <<"0.2.0">>,
       description => <<"Keeper of the society public square: records every agora post the minds publish so the record outlives the speakers">>}.
 
 start(_Opts) -> hecate_agora_sup:start_link().
@@ -66,12 +69,16 @@ capabilities() ->
        handler => {search_posts_responder, []}}].
 
 %% THE AUTHORITY THIS SERVICE ASKS THE REALM FOR, and deliberately nothing more:
-%% the three reads it serves, and the agora topics it listens on. It publishes
-%% to no topic at all, so it can never put words in the square it keeps.
+%% the three reads it serves and the two facts it publishes, over the agora
+%% topics it listens on and the two keeper topics it publishes to. Neither
+%% of those is a society's `<ns>/agora', so it can never put words in the
+%% square it keeps.
 identity_spec() ->
     #{scope => <<"hecate-agora">>,
-      actions => [<<"get_posts_page">>, <<"get_thread_by_post_id">>, <<"search_posts">>],
-      resources => [agora_societies:agora_topic(S) || S <- agora_societies:configured()],
+      actions => [<<"get_posts_page">>, <<"get_thread_by_post_id">>, <<"search_posts">>,
+                  <<"post_recorded">>, <<"post_conflict_detected">>],
+      resources => [agora_societies:agora_topic(S) || S <- agora_societies:configured()]
+                   ++ [agora_post_recorded_v1:topic(), agora_post_conflict_detected_v1:topic()],
       ttl_days => 30}.
 
 %% @doc The barrel_docdb database the record lives in. `agora_read_model'

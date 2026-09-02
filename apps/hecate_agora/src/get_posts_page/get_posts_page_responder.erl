@@ -4,8 +4,8 @@
 %% the one body-bearing fact hecate-spartan publishes into the open), so its
 %% record is public too.
 %%
-%% Payload, all optional: `society', `from', `before' (ms, exclusive),
-%% `limit'. Reply: `#{ok => 1, posts => [...], next_before => Ms}', with
+%% Payload, all optional: `society', `from', `before' and `after' (ms, both
+%% exclusive), `limit'. Reply: `#{ok => 1, posts => [...], next_before => Ms}', with
 %% `next_before' omitted on the last page. No booleans cross the wire.
 -module(get_posts_page_responder).
 
@@ -21,6 +21,7 @@ handle_request(Payload, State) ->
         society => text(hecate_om_wire:field(society, Payload)),
         from    => text(hecate_om_wire:field(from, Payload)),
         before  => integer(hecate_om_wire:field(before, Payload)),
+        'after' => integer(hecate_om_wire:field('after', Payload)),
         limit   => integer(hecate_om_wire:field(limit, Payload))
     }),
     #{posts := Posts, next_before := Next} = get_posts_page:get(Request),

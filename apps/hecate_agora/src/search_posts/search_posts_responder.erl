@@ -1,8 +1,8 @@
 %% @doc RESPONDER for the `hecate_agora.search_posts' mesh capability.
 %% Ungated, same reasoning as `get_posts_page_responder'.
 %%
-%% Payload: `query' (required); `society', `from', `before', `limit'
-%% optional. Reply: `#{ok => 1, posts => [...]}' best match first, each post
+%% Payload: `query' (required); `society', `from', `before', `after',
+%% `limit' optional. Reply: `#{ok => 1, posts => [...]}' best match first, each post
 %% carrying its `score', or `#{ok => 0, error => <<"query_required">>}'.
 -module(search_posts_responder).
 
@@ -19,6 +19,7 @@ handle_request(Payload, State) ->
         society => text(hecate_om_wire:field(society, Payload)),
         from    => text(hecate_om_wire:field(from, Payload)),
         before  => integer(hecate_om_wire:field(before, Payload)),
+        'after' => integer(hecate_om_wire:field('after', Payload)),
         limit   => integer(hecate_om_wire:field(limit, Payload))
     }),
     {reply, replied(search_posts:search(Request)), State}.

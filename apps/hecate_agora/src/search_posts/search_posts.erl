@@ -17,7 +17,7 @@
 %% that match the society/author filters, not the whole record, so a query
 %% costs the same on a square with a million posts as on one with a
 %% thousand. A caller that needs older matches narrows the window with the
-%% `before' filter.
+%% `before' filter, and `after' bounds it from below the same way.
 -module(search_posts).
 
 -export([search/1, tokens/1, score/2]).
@@ -30,6 +30,7 @@
                      society => binary(),
                      from => binary(),
                      before => integer(),
+                     'after' => integer(),
                      limit => integer()}.
 -export_type([request/0]).
 
@@ -43,7 +44,7 @@ searched([], _Query, _Request) ->
     {error, query_required};
 searched(Words, Query, Request) ->
     Limit = clamp(maps:get(limit, Request, ?DEFAULT_LIMIT)),
-    Filters = maps:with([society, from, before], Request),
+    Filters = maps:with([society, from, before, 'after'], Request),
     {ok, Docs} = agora_read_model:page(Filters#{limit => ?SCAN_WINDOW}),
     Scored = [{score(Doc, {Words, Query}), Doc} || Doc <- Docs],
     Hits = [{S, D} || {S, D} <- Scored, S > 0],

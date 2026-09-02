@@ -5,7 +5,23 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-02
+
+### Added
+
+- `agora/post_recorded`: one fact per post that enters the record, across every
+  society this keeper records, on the `record` outcome only. Deduplicated and
+  provenance-settled, which the raw `<ns>/agora` stream cannot give a consumer
+  (every spartan instance re-publishes its recent speech once a minute). For
+  visualizers and research; the minds get no tool for it, same as the record.
+- `agora/post_conflict_detected`: the `contradiction` outcome told to the mesh.
+  Mechanical (same `post_id`, different bytes), no model involved; carries the
+  kept and refused speakers, publishers, verification flags and body hashes,
+  never the bodies.
+- `after` on `hecate_agora.get_posts_page` and `hecate_agora.search_posts`,
+  exclusive on `posted_at` like `before`, so a subscriber that missed facts can
+  ask for everything since the last post it saw and close the gap by paging.
+- `agora` is refused as a society name: it is the keeper's own namespace.
 
 ### Fixed
 

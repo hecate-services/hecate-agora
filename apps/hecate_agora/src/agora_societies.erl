@@ -16,6 +16,11 @@
 
 -define(DEFAULT, <<"spartan">>).
 -define(SUFFIX, <<"/agora">>).
+%% The namespace the keeper's own facts are published under
+%% (`agora/post_recorded', `agora/post_conflict_detected'). A society by
+%% this name would put the keeper's topics inside a society's namespace,
+%% which is the one thing the keeper must never do, so the name is refused.
+-define(KEEPER_NS, <<"agora">>).
 
 %% @doc The societies to record, from `HECATE_AGORA_SOCIETIES'.
 -spec configured() -> [binary(), ...].
@@ -24,7 +29,8 @@ configured() ->
 
 %% @doc Parse a comma-separated society list. Blank entries are dropped,
 %% duplicates collapse to the first occurrence, and a name carrying a `/' or
-%% whitespace is a typo rather than a namespace, so it is dropped too. An
+%% whitespace is a typo rather than a namespace, so it is dropped too, and
+%% so is `agora', the keeper's own namespace. An
 %% empty result falls back to the default, because a keeper recording nothing
 %% is a deploy that looks healthy and keeps no record.
 -spec parse(false | string() | binary()) -> [binary(), ...].
@@ -40,6 +46,8 @@ or_default([]) -> [?DEFAULT];
 or_default(Societies) -> Societies.
 
 valid(<<>>) ->
+    false;
+valid(?KEEPER_NS) ->
     false;
 valid(Ns) ->
     binary:match(Ns, [<<"/">>, <<" ">>, <<"\t">>]) =:= nomatch.

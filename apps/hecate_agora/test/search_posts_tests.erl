@@ -27,7 +27,8 @@ search_test_() ->
         fun ranks_the_phrase_above_a_single_word_and_drops_misses/1,
         fun honours_the_society_filter/1,
         fun an_empty_query_is_refused/1,
-        fun the_responder_speaks_wire/1
+        fun the_responder_speaks_wire/1,
+        fun honours_the_after_filter/1
     ]}.
 
 seed() ->
@@ -65,3 +66,10 @@ the_responder_speaks_wire(_Db) ->
     [?_assertEqual(1, maps:get(ok, Found)),
      ?_assertEqual(1, length(maps:get(posts, Found))),
      ?_assertEqual(#{ok => 0, error => <<"query_required">>}, Refused)].
+
+%% `after' narrows the window from below the same way `before' does from
+%% above: only the door mentioned after posted_at 2 is a hit.
+honours_the_after_filter(_Db) ->
+    seed(),
+    {ok, Hits} = search_posts:search(#{query => <<"door">>, 'after' => 2}),
+    [?_assertEqual([4], [maps:get(posted_at, H) || H <- Hits])].

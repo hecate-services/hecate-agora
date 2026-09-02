@@ -1,5 +1,9 @@
 %% @doc A page of the record, newest first, optionally narrowed to one
-%% society or one speaker, and paged backwards in time with `before'.
+%% society or one speaker, paged backwards in time with `before', and
+%% bounded from below with `after' so a subscriber to `agora/post_recorded'
+%% that missed facts can ask for everything since the last post it saw:
+%% page with `after' fixed until the reply is not full, and the gap is
+%% closed.
 %%
 %% Bounded on purpose: `limit' defaults to 50 and caps at 200, so a caller
 %% that wants the whole square walks it page by page using the `next_before'
@@ -15,6 +19,7 @@
 -type request() :: #{society => binary(),
                      from => binary(),
                      before => integer(),
+                     'after' => integer(),
                      limit => integer()}.
 -export_type([request/0]).
 
@@ -23,7 +28,7 @@
 -spec get(request()) -> #{posts := [map()], next_before := integer() | undefined}.
 get(Request) ->
     Limit = clamp(maps:get(limit, Request, ?DEFAULT_LIMIT)),
-    Filters = maps:with([society, from, before], Request),
+    Filters = maps:with([society, from, before, 'after'], Request),
     {ok, Docs} = agora_read_model:page(Filters#{limit => Limit}),
     #{posts       => [agora_read_model:to_wire(D) || D <- Docs],
       next_before => next_before(length(Docs) =:= Limit, Docs)}.

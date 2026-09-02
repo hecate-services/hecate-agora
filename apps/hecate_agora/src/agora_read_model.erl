@@ -39,6 +39,8 @@
 -module(agora_read_model).
 
 -export([record/1, find/1, page/1, replies_to/2, societies/0, to_wire/1]).
+%% Wire shaping shared with the facts this service publishes.
+-export([wire_text/1, omit_undefined/1]).
 %% Pure, exported so the id's ordering property is testable on its own.
 -export([doc_id/3]).
 
@@ -58,6 +60,7 @@
 -type page_filters() :: #{society => binary(),
                           from => binary(),
                           before => integer(),
+                          'after' => integer(),
                           limit := pos_integer()}.
 -export_type([post/0, page_filters/0]).
 
@@ -120,14 +123,17 @@ find(PostId) when is_binary(PostId) ->
 one({ok, [Doc | _], _Meta}) -> {ok, Doc};
 one({ok, [], _Meta}) -> {error, not_found}.
 
-%% @doc A page of posts, newest first. `before' is exclusive on `posted_at',
-%% so a caller pages by passing the last post's `posted_at' back in. Without
+%% @doc A page of posts, newest first. `before' and `after' are both
+%% exclusive on `posted_at': a caller pages backwards by passing the last
+%% post's `posted_at' back in as `before', and a subscriber catching up on
+%% what it missed asks for everything `after' the last post it saw. Without
 %% `society' every society this record has ever heard is merged.
 -spec page(page_filters()) -> {ok, [map()]}.
 page(#{limit := Limit} = Filters) when is_integer(Limit), Limit > 0 ->
     Before = maps:get(before, Filters, undefined),
+    After = maps:get('after', Filters, undefined),
     From = maps:get(from, Filters, undefined),
-    Scans = [scan(S, Before, From, Limit) || S <- scope(maps:get(society, Filters, undefined))],
+    Scans = [scan(S, Before, After, From, Limit) || S <- scope(maps:get(society, Filters, undefined))],
     {ok, lists:sublist(newest_first(lists:append(Scans)), Limit)}.
 
 scope(undefined) -> societies();
@@ -136,8 +142,18 @@ scope(Society) -> [Society].
 %% One society, newest first, at most Limit posts matching From, scanning
 %% chunk by chunk from the range start until enough matched, the range ran
 %% out, or the scan cap was hit.
-scan(Society, Before, From, Limit) ->
-    Spec = #{id_range => {range_start(Society, Before), range_end(Society)}, flat => true},
+scan(Society, Before, After, From, Limit) ->
+    window(empty_window(Before, After), Society, Before, After, From, Limit).
+
+%% Both bounds are exclusive, so the window holds something only if at
+%% least one millisecond lies strictly between them.
+empty_window(Before, After) when is_integer(Before), is_integer(After) -> After + 1 >= Before;
+empty_window(_Before, _After) -> false.
+
+window(true, _Society, _Before, _After, _From, _Limit) ->
+    [];
+window(false, Society, Before, After, From, Limit) ->
+    Spec = #{id_range => {range_start(Society, Before), range_end(Society, After)}, flat => true},
     collect(barrel_docdb:find(db(), Spec, #{chunk_size => ?CHUNK}), Spec, From, Limit, 0, []).
 
 collect({ok, Docs, Meta}, Spec, From, Limit, Scanned, Acc) ->
@@ -161,9 +177,14 @@ spoken_by(From, Doc) -> maps:get(<<"from">>, Doc, undefined) =:= From.
 range_start(Society, undefined) -> <<Society/binary, "/">>;
 range_start(Society, Before) -> <<Society/binary, "/", (inverted(Before - 1))/binary, "/">>.
 
-%% `0' is the byte after `/', so this ends the range right after the last id
-%% of this society and before any society whose name merely extends it.
-range_end(Society) -> <<Society/binary, "0">>.
+%% Without `after': `0' is the byte after `/', so this ends the range right
+%% after the last id of this society and before any society whose name
+%% merely extends it. With `after': a post with posted_at > After has a
+%% smaller inverted time than After's, so its id sorts before
+%% `<society>/<inverted After>/', while a post AT After sorts after it.
+%% That is exactly posted_at > After: `after' is exclusive, like `before'.
+range_end(Society, undefined) -> <<Society/binary, "0">>;
+range_end(Society, After) -> <<Society/binary, "/", (inverted(After))/binary, "/">>.
 
 %% @doc The direct replies to a post, oldest first. The set of direct replies
 %% to one post is small; it is fetched by path equality and ordered here.
@@ -233,6 +254,14 @@ to_wire(Doc) ->
 text(undefined) -> undefined;
 text(Bin) when is_binary(Bin) -> {text, Bin}.
 
+%% @doc A text field for the wire, or `undefined' to be omitted. The facts
+%% this service publishes follow the same contract as its replies.
+-spec wire_text(binary() | undefined) -> {text, binary()} | undefined.
+wire_text(Value) ->
+    text(Value).
+
+%% @doc A wire map without its absent fields.
+-spec omit_undefined(map()) -> map().
 omit_undefined(Map) ->
     maps:filter(fun(_K, V) -> V =/= undefined end, Map).
 

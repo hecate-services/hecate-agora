@@ -1,6 +1,6 @@
 {application, hecate_agora, [
     {description, "Keeper of the society public square: records every agora post the minds publish so the record outlives the speakers"},
-    {vsn, "0.1.0"},
+    {vsn, "0.2.0"},
     {registered, [hecate_agora_sup]},
     {mod, {hecate_agora_app, []}},
     {applications, [

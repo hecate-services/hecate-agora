@@ -32,3 +32,9 @@ society_of_a_non_agora_topic_is_undefined_test() ->
     ?assertEqual(undefined, agora_societies:society_of_topic(<<"spartan/feed">>)),
     ?assertEqual(undefined, agora_societies:society_of_topic(<<"/agora">>)),
     ?assertEqual(undefined, agora_societies:society_of_topic(<<"agora">>)).
+
+%% `agora' is the keeper's own namespace (`agora/post_recorded'), so it can
+%% never be a society: it is dropped like a typo, and the rest stand.
+the_keeper_namespace_is_not_a_society_test() ->
+    ?assertEqual([<<"spartan">>], agora_societies:parse("agora")),
+    ?assertEqual([<<"news">>], agora_societies:parse("agora,news")).

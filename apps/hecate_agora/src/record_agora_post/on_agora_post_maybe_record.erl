@@ -15,6 +15,14 @@
 %%
 %% There is no `stale' outcome, unlike a presence read model: speech does
 %% not expire and a late delivery of an old post is still a post.
+%%
+%% Two of the outcomes are also told to the mesh, after the fact and
+%% fire-and-forget: `record' publishes `agora/post_recorded'
+%% (`agora_post_recorded_v1') once the write is on disk, and `contradiction'
+%% publishes `agora/post_conflict_detected'
+%% (`agora_post_conflict_detected_v1'). A duplicate tells nobody anything:
+%% that is the whole point of deduplicating here rather than in every
+%% consumer.
 -module(on_agora_post_maybe_record).
 
 -export([handle/1, decide/2]).
@@ -24,7 +32,8 @@
 
 -spec handle(agora_read_model:post()) -> outcome().
 handle(#{post_id := PostId} = Post) ->
-    acted(decide(existing(PostId), Post), Post).
+    Existing = existing(PostId),
+    acted(decide(Existing, Post), Existing, Post).
 
 existing(PostId) ->
     found(agora_read_model:find(PostId)).
@@ -41,17 +50,22 @@ decide(#{<<"body">> := Body}, #{body := Body}) ->
 decide(_Existing, _Incoming) ->
     contradiction.
 
-acted(record, Post) ->
+acted(record, _Existing, Post) ->
     written(agora_read_model:record(Post), Post);
-acted(duplicate, _Post) ->
+acted(duplicate, _Existing, _Post) ->
     duplicate;
-acted(contradiction, #{post_id := PostId, from := From, society := Society}) ->
+acted(contradiction, Existing, #{post_id := PostId, from := From, society := Society} = Post) ->
     logger:error("[agora] contradiction on ~s/agora: post ~s from ~s arrived "
                  "with a different body than the one on record; keeping the first",
                  [Society, PostId, From]),
+    ok = agora_post_conflict_detected_v1:publish(Existing, Post),
     contradiction.
 
-written(ok, _Post) ->
+%% On disk first, then told: the record is durable before anyone hears of
+%% the post, and a subscriber that missed the fact catches up over
+%% get_posts_page's `after' filter.
+written(ok, Post) ->
+    ok = agora_post_recorded_v1:publish(Post),
     recorded;
 %% The same post landed twice between the existence check and the write --
 %% a redelivery racing itself. The first write stands.
