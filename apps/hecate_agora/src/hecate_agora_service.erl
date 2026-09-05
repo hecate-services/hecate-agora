@@ -30,8 +30,13 @@
 %% subscriptions that feed it. read_model_id/0 REQUIRES data_dir/0 alongside
 %% it -- hecate_om:boot/1 opens the database at data_dir/read_model_id before
 %% start/1 runs, and wires subscriptions/0 after that, so the record is open
-%% before the first post can arrive.
--export([read_model_id/0, data_dir/0, subscriptions/0]).
+%% before the first post can arrive. read_model_ttl_sweep/0 arms
+%% barrel_docdb's native per-document TTL sweeper on that same database, so
+%% a post `agora_read_model:record/1' wrote with `expires_at' set actually
+%% has its disk reclaimed once `retire_stale_posts' has archived it -- see
+%% that module's own doc for why archiving always runs well before this
+%% fires.
+-export([read_model_id/0, data_dir/0, read_model_ttl_sweep/0, subscriptions/0]).
 
 info() ->
     #{name => <<"hecate-agora">>,
@@ -66,7 +71,9 @@ capabilities() ->
      #{name => <<"hecate_agora.get_thread_by_post_id">>, version => 1,
        handler => {get_thread_by_post_id_responder, []}},
      #{name => <<"hecate_agora.search_posts">>, version => 1,
-       handler => {search_posts_responder, []}}].
+       handler => {search_posts_responder, []}},
+     #{name => <<"hecate_agora.search_archive">>, version => 1,
+       handler => {search_archive_responder, []}}].
 
 %% THE AUTHORITY THIS SERVICE ASKS THE REALM FOR, and deliberately nothing more:
 %% the three reads it serves and the two facts it publishes, over the agora
@@ -76,7 +83,7 @@ capabilities() ->
 identity_spec() ->
     #{scope => <<"hecate-agora">>,
       actions => [<<"get_posts_page">>, <<"get_thread_by_post_id">>, <<"search_posts">>,
-                  <<"post_recorded">>, <<"post_conflict_detected">>],
+                  <<"search_archive">>, <<"post_recorded">>, <<"post_conflict_detected">>],
       resources => [agora_societies:agora_topic(S) || S <- agora_societies:configured()]
                    ++ [agora_post_recorded_v1:topic(), agora_post_conflict_detected_v1:topic()],
       ttl_days => 30}.
@@ -94,6 +101,24 @@ read_model_id() -> <<"hecate_agora">>.
 %% one.
 -spec data_dir() -> string().
 data_dir() -> os:getenv("HECATE_DATA_DIR", "/var/lib/hecate-agora").
+
+%% @doc Arms barrel_docdb's native per-document TTL sweeper on the hot
+%% record, so a post `agora_read_model:record/1' wrote with `expires_at'
+%% set genuinely has its disk reclaimed once it's past its hot window.
+%% Arming this alone expires nothing FOR THIS SERVICE'S OWN READS: barrel's
+%% lazy expiry (a document past its deadline is invisible on read with no
+%% sweep needed) is real, but only for `get_doc'/`get_docs'/`fold_docs' --
+%% every read this service does (`page/1', `find/1', `agora_archive:search/1')
+%% goes through `find/2,3', which `barrel_query' compiles and executes
+%% without ever checking expiry (confirmed by reading that module, not
+%% assumed). So a post stays visible to this service's own reads until this
+%% sweeper has actually run and turned it into a real tombstone -- it is
+%% the only thing that makes `expires_at' matter here, not a backstop for
+%% something already invisible. One hour between passes, well under the
+%% days-long margin `retire_stale_posts' keeps before a post's own expiry,
+%% so the sweeper always gets several chances to run before that matters.
+-spec read_model_ttl_sweep() -> #{interval_ms := pos_integer(), batch := pos_integer()}.
+read_model_ttl_sweep() -> #{interval_ms => 3_600_000, batch => 1000}.
 
 %% @doc One supervised listener per configured society, on that society's
 %% agora topic. `HECATE_AGORA_SOCIETIES' names them; `spartan' by default.

@@ -25,6 +25,20 @@ an_out_of_range_time_is_clamped_in_the_id_not_rejected_test() ->
     ?assert(is_binary(agora_read_model:doc_id(<<"s">>, -5, <<"x">>))),
     ?assert(is_binary(agora_read_model:doc_id(<<"s">>, 99999999999999999, <<"x">>))).
 
+%%% parse_hot_window_days/1 -- pure, same posture as agora_societies:parse/1.
+
+unset_hot_window_falls_back_to_the_default_test() ->
+    ?assertEqual(30, agora_read_model:parse_hot_window_days(false)).
+
+an_unparseable_hot_window_falls_back_to_the_default_test() ->
+    ?assertEqual(30, agora_read_model:parse_hot_window_days("not a number")),
+    ?assertEqual(30, agora_read_model:parse_hot_window_days("0")),
+    ?assertEqual(30, agora_read_model:parse_hot_window_days("-5")).
+
+a_valid_hot_window_is_used_test() ->
+    ?assertEqual(7, agora_read_model:parse_hot_window_days("7")),
+    ?assertEqual(90, agora_read_model:parse_hot_window_days(" 90 ")).
+
 %%% Against a real record.
 
 read_model_test_() ->
@@ -40,7 +54,9 @@ read_model_test_() ->
         fun a_society_named_like_a_prefix_of_another_is_kept_apart/1,
         fun replies_to_is_oldest_first/1,
         fun societies_lists_each_once/1,
-        fun to_wire_uses_atom_keys_text_tags_and_omits_undefined/1
+        fun to_wire_uses_atom_keys_text_tags_and_omits_undefined/1,
+        fun a_post_past_its_hot_window_is_gone/1,
+        fun a_fresh_post_within_its_hot_window_stays/1
     ]}.
 
 record_then_find_round_trips_every_field(_Db) ->
@@ -150,3 +166,42 @@ to_wire_uses_atom_keys_text_tags_and_omits_undefined(_Db) ->
      %% Every binary-valued field is a CBOR text string on the wire, never a
      %% byte string that a non-BEAM reader would see as hex.
      ?_assertEqual([], [K || K := V <- Wire, is_binary(V)])].
+
+%% barrel_docdb's lazy expiry (an expired document is gone the instant its
+%% expires_at deadline passes, no sweep required -- see
+%% barrel_docdb_reader:expired/1's own doc comment) is real, but it is a
+%% property of get_doc/get_docs/fold_docs specifically. find/2,3 (what
+%% every read in this module actually uses -- page/1, find/1,
+%% replies_to/2, societies/0, and agora_archive:search/1) is compiled and
+%% executed by barrel_query, which never calls expired/1 at all: confirmed
+%% by grepping barrel_query.erl for it, not assumed. So this record's own
+%% read paths keep serving a post past its expires_at until the TTL
+%% sweeper (hecate_agora_service:read_model_ttl_sweep/0) has actually run
+%% and converted it to a real tombstone -- these two tests check what
+%% record/1 is actually responsible for (that expires_at is set to a
+%% deadline that already passed, or hasn't, for the given posted_at) via
+%% barrel_docdb:get_doc/2 directly, the one read path that DOES honor it,
+%% rather than asserting something agora_read_model:find/1 was never going
+%% to exhibit.
+a_post_past_its_hot_window_is_gone(_Db) ->
+    true = os:putenv("HECATE_AGORA_HOT_WINDOW_DAYS", "1"),
+    %% posted_at two days ago: one day past the one-day hot window.
+    TwoDaysAgo = agora_test_db:now_ms() - 2 * 86_400_000,
+    Post = agora_test_db:post(#{posted_at => TwoDaysAgo}),
+    ok = agora_read_model:record(Post),
+    Result = get_doc_directly(TwoDaysAgo, maps:get(post_id, Post)),
+    true = os:unsetenv("HECATE_AGORA_HOT_WINDOW_DAYS"),
+    ?_assertEqual({error, not_found}, Result).
+
+a_fresh_post_within_its_hot_window_stays(_Db) ->
+    true = os:putenv("HECATE_AGORA_HOT_WINDOW_DAYS", "1"),
+    Now = agora_test_db:now_ms(),
+    Post = agora_test_db:post(#{posted_at => Now}),
+    ok = agora_read_model:record(Post),
+    Result = get_doc_directly(Now, maps:get(post_id, Post)),
+    true = os:unsetenv("HECATE_AGORA_HOT_WINDOW_DAYS"),
+    ?_assertMatch({ok, _}, Result).
+
+get_doc_directly(PostedAt, PostId) ->
+    {ok, DbName} = hecate_om:read_model(),
+    barrel_docdb:get_doc(DbName, agora_read_model:doc_id(<<"spartan">>, PostedAt, PostId)).

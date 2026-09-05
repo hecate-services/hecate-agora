@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Hot/archive retention**, reversing the original "no expiry" design (see
+  README's own "Retention" section for the full reasoning): posts age out of
+  the hot record after `HECATE_AGORA_HOT_WINDOW_DAYS` (default 30) via
+  barrel_docdb's own per-document TTL sweep, retired first into a yearly,
+  per-society archive segment (`retire_stale_posts`, a one-hour timer) kept
+  for `HECATE_AGORA_ARCHIVE_YEARS` (default 10) before the whole segment is
+  pruned. Nothing is lost in the hand-off: the archive copy always lands
+  well before the hot sweep reaps the original.
+- `hecate_agora.search_archive`: `society`, `from`, `until` (all required,
+  ms) and an optional `limit`, reading the archive tier only. Required
+  bounds rather than `get_posts_page`'s all-optional filters, on purpose --
+  the archive can span years, and an unbounded query is exactly the growth
+  this design exists to avoid repeating.
+- `HECATE_AGORA_HOT_WINDOW_DAYS`, `HECATE_AGORA_ARCHIVE_YEARS`: see above.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

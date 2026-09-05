@@ -5,10 +5,20 @@
 %% any other way: `on_agora_post_maybe_record' writes, the query desks read.
 %%
 %% A post is immutable speech, so a document is written once and never
-%% revised, and nothing here expires: unlike a presence directory
-%% (hecate-citizens) or a station list (hecate-stations), where a fact that
-%% stops being refreshed must age out, a post that was said stays said. That
-%% is the whole point of this service.
+%% revised. It DOES eventually leave this record, though -- as of the
+%% archive design (2026-09), a post that was said still stays said, but not
+%% necessarily HERE: past `hot_window_days/0' it is retired to a yearly
+%% `agora_archive' segment (`retire_stale_posts' does the retiring) and
+%% expires out of this hot record via barrel_docdb's own per-document TTL
+%% (`expires_at' set at write time in `record/1', the sweep armed by
+%% `hecate_agora_service:read_model_ttl_sweep/0'). The prior version of this
+%% comment said nothing here expires at all, matching this service's
+%% original design; the real, current policy is the hot/cold split above,
+%% not permanence -- see the README's own "Retention" section. This is
+%% still not a presence directory or a station list: a post ages out of
+%% the HOT record on a schedule, not because something stopped refreshing
+%% it, and the record of it (in the archive) outlives its time in the
+%% square everyone actually reads.
 %%
 %% == Why the document id carries the time ==
 %%
@@ -41,8 +51,13 @@
 -export([record/1, find/1, page/1, replies_to/2, societies/0, to_wire/1]).
 %% Wire shaping shared with the facts this service publishes.
 -export([wire_text/1, wire_stimulus/1, omit_undefined/1]).
-%% Pure, exported so the id's ordering property is testable on its own.
--export([doc_id/3]).
+%% Pure, exported so the id's ordering property is testable on its own, and
+%% so `agora_archive' builds its own segment id-ranges against the exact
+%% same encoding rather than a second copy of it.
+-export([doc_id/3, inverted/1]).
+%% Exported so `retire_stale_posts' knows the same cutoff this module
+%% writes against, and so it's testable without an environment.
+-export([hot_window_days/0, hot_window_ms/0, parse_hot_window_days/1]).
 
 -type post() :: #{post_id := binary(),
                   society := binary(),
@@ -90,6 +105,18 @@
 -define(CHUNK, 200).
 -define(SCAN_CAP, 5000).
 
+%% How long a post stays in the hot record before barrel_docdb's own TTL
+%% sweep (armed by `hecate_agora_service:read_model_ttl_sweep/0') reclaims
+%% it, counted from its OWN `posted_at' (not when it was written or heard).
+%% `retire_stale_posts' copies a post into the archive well before the
+%% sweep actually reaps it -- barrel's lazy expiry (invisible on read past
+%% `expires_at') doesn't apply to `find/2,3', which every read this module
+%% does (including the migration scan) goes through, so a stale post stays
+%% visible here until that sweep physically deletes it, not the instant
+%% `expires_at' passes.
+-define(HOT_WINDOW_DAYS_DEFAULT, 30).
+-define(DAY_MS, 86_400_000).
+
 %% @doc Write a post once. `{error, conflict}' when this exact document
 %% already exists, which the policy treats as a duplicate delivery.
 -spec record(post()) -> ok | {error, term()}.
@@ -113,10 +140,35 @@ record(#{post_id := PostId, society := Society, posted_at := PostedAt} = Post)
         <<"heard_at">>           => maps:get(heard_at, Post),
         <<"heard_via">>          => maps:get(heard_via, Post)
     }),
-    written(barrel_docdb:put_doc(db(), Doc), Society).
+    written(barrel_docdb:put_doc(db(), Doc, #{expires_at => PostedAt + hot_window_ms()}), Society).
 
 written({ok, _}, Society) -> remember_society(Society);
 written({error, _} = Error, _Society) -> Error.
+
+%% @doc Days a post stays in the hot record, from `HECATE_AGORA_HOT_WINDOW_DAYS'.
+%% Unset or unparseable falls back to the default rather than refusing to
+%% boot, same posture as `agora_societies:parse/1'.
+-spec hot_window_days() -> pos_integer().
+hot_window_days() -> parse_hot_window_days(os:getenv("HECATE_AGORA_HOT_WINDOW_DAYS")).
+
+%% @doc Pure, exported so parsing is unit-testable without an environment,
+%% same posture as `agora_societies:parse/1'. Unset or unparseable falls
+%% back to the default rather than refusing to boot.
+-spec parse_hot_window_days(false | string()) -> pos_integer().
+parse_hot_window_days(false) -> ?HOT_WINDOW_DAYS_DEFAULT;
+parse_hot_window_days(Str) when is_list(Str) -> valid_days(parsed_int(Str)).
+
+parsed_int(Str) ->
+    case string:to_integer(string:trim(Str)) of
+        {N, ""} -> N;
+        _NotAnInteger -> ?HOT_WINDOW_DAYS_DEFAULT
+    end.
+
+valid_days(N) when is_integer(N), N > 0 -> N;
+valid_days(_NotPositive) -> ?HOT_WINDOW_DAYS_DEFAULT.
+
+-spec hot_window_ms() -> pos_integer().
+hot_window_ms() -> hot_window_days() * ?DAY_MS.
 
 %% @doc The id a post is stored under: society, then inverted time so newer
 %% sorts first, then the post id so two posts in the same millisecond still

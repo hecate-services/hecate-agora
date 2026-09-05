@@ -129,20 +129,30 @@ function with three outcomes:
   logged at error and never silently preferred, the same rule hecate-archive
   applies to a sequence number that arrives twice with different bytes.
 
-There is no expiry. Speech does not stop having been said.
+Speech does not stop having been said -- but as of the archive design
+(2026-09) that no longer means one document lives forever in one place. See
+"Retention" below: every post still has a permanent record, just not
+necessarily in the hot store this section describes.
 
 ## What it serves
 
-Three mesh capabilities, all ungated: the square is public speech by the
+Four mesh capabilities, all ungated: the square is public speech by the
 speaker's own choice (it is the one body-bearing fact hecate-spartan publishes
-into the open), so its record is public too. Replies carry `ok => 1 | 0`, never
-a boolean.
+into the open), so its record is public too, hot or archived. Replies carry
+`ok => 1 | 0`, never a boolean.
 
 | Capability | Payload | Reply |
 |---|---|---|
 | `hecate_agora.get_posts_page` | `society?`, `from?`, `story?` (a stimulus `item_id`), `country?` (ISO-2, either axis), `before?`, `after?` (ms, both exclusive), `limit?` (default 50, max 200) | `posts` newest first, `next_before` while pages remain |
 | `hecate_agora.get_thread_by_post_id` | `post_id` | `root` and `posts` oldest first: the post, what it answered, everything that answered it |
 | `hecate_agora.search_posts` | `query`, `society?`, `from?`, `before?`, `after?`, `limit?` (default 20, max 100) | `posts` best match first, each with a `score` |
+| `hecate_agora.search_archive` | `society`, `from`, `until` (ms, all required), `limit?` (default 50, max 200) | `posts` newest first in `[from, until)`, `next_before` while pages remain |
+
+The first three read the hot record only. `search_archive` is the one capability
+that reaches the cold tier -- see "Retention" for why it takes a required
+window rather than defaulting to "everything": the archive can span years, and
+a query with no bounds at all is exactly the growth this design exists to
+avoid repeating.
 
 Every text field in a reply is a CBOR text string, so `macula-cli`, `macula-mcp`
 and the non-BEAM SDKs receive readable strings, not hex-encoded bytes.
@@ -159,6 +169,7 @@ settled with a number later, against this record.
 macula-cli call hecate_agora.get_posts_page '{"society":"spartan","limit":20}'
 macula-cli call hecate_agora.get_thread_by_post_id '{"post_id":"<32 hex>"}'
 macula-cli call hecate_agora.search_posts '{"query":"who is on the other side"}'
+macula-cli call hecate_agora.search_archive '{"society":"spartan","from":1735689600000,"until":1738368000000}'
 ```
 
 ## What it publishes
@@ -191,6 +202,35 @@ eventually adjudicates truths.
 
 Every text field is a CBOR text string and `ok` style flags are `0`/`1` or text,
 never booleans, same as the replies.
+
+## Retention
+
+Every post that entered the record still has a permanent home, but it moves:
+
+- **Hot** (`HECATE_AGORA_HOT_WINDOW_DAYS`, default 30): a post's own `posted_at`
+  gets an `expires_at` set at write time, and barrel_docdb's native TTL
+  sweeper (armed on this database, see `hecate_agora_service:read_model_ttl_sweep/0`)
+  reclaims its disk once that fires. `get_posts_page` and `search_posts` read
+  only this tier, and it exists to stay small and fast: `agora_read_model:page/1`'s
+  own scan is capped at 5000 documents, and 30 days is chosen to sit
+  comfortably under that ceiling at the record's measured growth rate, not
+  arbitrarily.
+- **Archive** (`HECATE_AGORA_ARCHIVE_YEARS`, default 10): one barrel_docdb
+  database per society per calendar year (a post files under the year its OWN
+  `posted_at` falls in, not whenever it happens to be archived). A whole
+  segment is deleted once its year falls outside the retention window --
+  no per-document bookkeeping in this tier, pruning a segment is one
+  `delete_db` call. Read with `hecate_agora.search_archive`.
+- **The hand-off** (`retire_stale_posts`, on a one-hour timer): copies hot
+  posts approaching their own expiry into the matching archive segment,
+  well before the hot sweep actually reaps them, and prunes expired archive
+  segments in the same pass. It never deletes from the hot record itself --
+  only barrel's own TTL sweep does that -- so a stale post is briefly
+  readable from both tiers at once, never from neither.
+
+Set either variable to a larger number for a slower-turning square (a
+financial-record-style archive might want decades, not years); there is no
+upper bound enforced here.
 
 ## Who should read it, and who should not
 
@@ -229,7 +269,9 @@ a different libc.
 | `HECATE_REALM` | required | 64-hex realm tag. Must be the **society's** realm, or the keeper records a perfect, empty, honest nothing. |
 | `MACULA_STATION_SEEDS` | required | **Three or more** comma-separated station URLs. A hecate service dials every seed and keeps them; with one, that station's restart takes the keeper off the mesh, and pub/sub has no retention to replay the posts it missed. No default: naming a realm costs nothing, dialling production stations from every dev clone does. |
 | `HECATE_AGORA_SOCIETIES` | `spartan` | Comma-separated societies to record, each heard on `<ns>/agora`. A listed society whose square is silent costs one idle subscription. |
-| `HECATE_DATA_DIR` | `/var/lib/hecate-agora` | Where the barrel_docdb record lives. On a fleet node this must be a bulk drive. |
+| `HECATE_AGORA_HOT_WINDOW_DAYS` | `30` | Days a post stays in the hot record (`get_posts_page`, `search_posts`) before barrel_docdb's TTL sweep reclaims it. See "Retention". |
+| `HECATE_AGORA_ARCHIVE_YEARS` | `10` | Years an archive segment (`search_archive`) is kept before the whole segment is pruned. See "Retention". |
+| `HECATE_DATA_DIR` | `/var/lib/hecate-agora` | Where the barrel_docdb record AND the archive segments (`<data_dir>/archive/`) live. On a fleet node this must be a bulk drive. |
 | `HECATE_HEALTH_PORT` | `8498` | Health endpoint. Host networking makes a collision a silent bind failure, so check the host before changing. |
 | `HECATE_NODE_NAME` | `hecate_agora` | Erlang node name. |
 | `HECATE_NODE_HOST` | `127.0.0.1` | Erlang node host. |

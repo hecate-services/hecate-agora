@@ -65,19 +65,22 @@ health_is_down_without_the_record_and_green_with_it_test() ->
     ?assertEqual(ok, ?SERVICE:health()),
     ok = agora_test_db:teardown(Db).
 
-%% This service exists to answer exactly three reads over the record. This pins
-%% the shape hecate_om_capabilities destructures (name, version, handler) so a
-%% typo in any of them fails loudly here instead of as a mesh peer's confusing
+%% This service exists to answer exactly four reads over the record (three
+%% over the hot record, one over the archive). This pins the shape
+%% hecate_om_capabilities destructures (name, version, handler) so a typo in
+%% any of them fails loudly here instead of as a mesh peer's confusing
 %% "no such procedure".
-announces_the_three_reads_over_the_record_test() ->
+announces_the_four_reads_over_the_record_test() ->
     Caps = ?SERVICE:capabilities(),
     ?assertEqual([<<"hecate_agora.get_posts_page">>,
                   <<"hecate_agora.get_thread_by_post_id">>,
-                  <<"hecate_agora.search_posts">>],
+                  <<"hecate_agora.search_posts">>,
+                  <<"hecate_agora.search_archive">>],
                  [maps:get(name, C) || C <- Caps]),
-    ?assertEqual([get_posts_page_responder, get_thread_by_post_id_responder, search_posts_responder],
+    ?assertEqual([get_posts_page_responder, get_thread_by_post_id_responder,
+                  search_posts_responder, search_archive_responder],
                  [Mod || #{handler := {Mod, []}} <- Caps]),
-    ?assertEqual([1, 1, 1], [maps:get(version, C) || C <- Caps]),
+    ?assertEqual([1, 1, 1, 1], [maps:get(version, C) || C <- Caps]),
     %% Every handler is a real macula_response module that loads.
     ?assertEqual([], [Mod || #{handler := {Mod, _}} <- Caps,
                              code:ensure_loaded(Mod) =/= {module, Mod}]).
@@ -104,6 +107,17 @@ exports_the_read_model_pair_test() ->
     ?assertEqual(<<"hecate_agora">>, ?SERVICE:read_model_id()),
     ?assert(is_list(?SERVICE:data_dir())).
 
+%% Without this, agora_read_model:record/1's own expires_at is set but
+%% never reclaimed -- barrel_docdb's sweeper only runs when a database is
+%% opened with this config, per hecate_om_service:read_model_ttl_sweep/0's
+%% own doc.
+read_model_ttl_sweep_is_armed_test() ->
+    _ = code:ensure_loaded(?SERVICE),
+    ?assert(erlang:function_exported(?SERVICE, read_model_ttl_sweep, 0)),
+    #{interval_ms := Interval, batch := Batch} = ?SERVICE:read_model_ttl_sweep(),
+    ?assert(is_integer(Interval) andalso Interval > 0),
+    ?assert(is_integer(Batch) andalso Batch > 0).
+
 identity_spec_has_the_shape_hecate_om_expects_test() ->
     #{scope := Scope, actions := Actions,
       resources := Resources, ttl_days := Ttl} = ?SERVICE:identity_spec(),
@@ -126,15 +140,15 @@ authority_matches_what_is_announced_heard_and_published_test() ->
     ?assertEqual([Topic || {Topic, _, _} <- ?SERVICE:subscriptions()] ++ Published, Resources),
     ?assertEqual([], [T || T <- Published, agora_societies:society_of_topic(T) =/= undefined]).
 
-%% The supervisor starts and stops cleanly on its own, without hecate_om. It has
-%% no children of its own, and that is the honest shape: the listeners are
-%% supervised by hecate_om_pubsub_sup and the responders by
-%% hecate_om_capabilities, both wired from this service's callbacks by
-%% hecate_om:boot/1.
+%% The supervisor starts and stops cleanly on its own, without hecate_om. Its
+%% one child is retire_stale_posts_worker; the listeners are supervised by
+%% hecate_om_pubsub_sup and the responders by hecate_om_capabilities, both
+%% wired from this service's callbacks by hecate_om:boot/1, not here.
 supervisor_starts_and_stops_test() ->
     {ok, Pid} = hecate_agora_sup:start_link(),
     ?assert(is_process_alive(Pid)),
-    ?assertEqual([], supervisor:which_children(Pid)),
+    ?assertEqual([retire_stale_posts_worker],
+                 [Id || {Id, _Child, _Type, _Modules} <- supervisor:which_children(Pid)]),
     unlink(Pid),
     exit(Pid, shutdown).
 
